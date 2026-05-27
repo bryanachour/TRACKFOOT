@@ -6,6 +6,8 @@ from typing import Optional
 
 import yt_dlp
 
+from .veo_extractor import get_session, is_veo_url
+
 
 URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
@@ -15,6 +17,15 @@ def is_url(text: str) -> bool:
 
 
 def download_url(url: str, dest_dir: Path, progress_hook: Optional[callable] = None) -> Path:
+    url = url.strip()
+    if is_veo_url(url):
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        out = dest_dir / f"veo_{uuid.uuid4().hex}.mp4"
+        return get_session().extract_mp4(url, out)
+    return _download_via_ytdlp(url, dest_dir, progress_hook)
+
+
+def _download_via_ytdlp(url: str, dest_dir: Path, progress_hook: Optional[callable] = None) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(dest_dir / f"{uuid.uuid4().hex}.%(ext)s")
     opts = {
@@ -50,3 +61,14 @@ def resolve_input(file_path: Optional[str], url: Optional[str], dest_dir: Path) 
     if url and is_url(url):
         return download_url(url.strip(), dest_dir)
     raise ValueError("provide either an uploaded file or a URL")
+
+
+def hint_for_url(url: str) -> Optional[str]:
+    if not url or not is_url(url):
+        return None
+    if is_veo_url(url):
+        sess = get_session()
+        if not sess.connected:
+            return "⚠️ URL Veo détectée — connecte-toi d'abord dans le panneau 🔐 Veo en haut."
+        return f"✅ URL Veo, session active ({sess.email})"
+    return None

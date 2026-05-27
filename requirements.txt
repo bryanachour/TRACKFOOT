@@ -11,3 +11,4 @@ tqdm>=4.65.0
 roboflow>=1.1.0
 gradio>=4.20.0
 yt-dlp>=2024.4.9
+playwright>=1.40.0
