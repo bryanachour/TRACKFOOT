@@ -6,7 +6,14 @@ from typing import Optional, Tuple
 
 
 VEO_URL_RE = re.compile(r"^https?://(?:app\.)?veo\.co/", re.IGNORECASE)
-VEO_LOGIN_URL = "https://app.veo.co/login"
+VEO_ROOT_URL = "https://app.veo.co/"
+VEO_LOGIN_CANDIDATES = [
+    "https://app.veo.co/",
+    "https://app.veo.co/login",
+    "https://app.veo.co/login/",
+    "https://app.veo.co/sign-in",
+    "https://app.veo.co/signin",
+]
 
 
 def is_veo_url(text: str) -> bool:
@@ -31,21 +38,29 @@ class VeoSession:
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-                context = browser.new_context()
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                    )
+                )
                 page = context.new_page()
-                page.goto(VEO_LOGIN_URL, wait_until="domcontentloaded", timeout=timeout_ms)
+
+                reached_form = self._navigate_to_login_form(page, timeout_ms)
+                if not reached_form:
+                    body = self._safe_text(page, "body")[:400]
+                    browser.close()
+                    err = f"❌ Impossible de trouver le form de login (page actuelle : {page.url}). Extrait : {body}"
+                    self.last_error = err
+                    return False, err
 
                 self._dismiss_cookies(page)
                 self._fill_login(page, email, password)
                 self._submit_login(page)
 
-                try:
-                    page.wait_for_url(
-                        lambda url: "/login" not in url and "auth" not in url.lower(),
-                        timeout=timeout_ms,
-                    )
-                except Exception:
+                logged_in = self._wait_for_logged_in(page, timeout_ms)
+                if not logged_in:
                     err = self._extract_login_error(page)
                     browser.close()
                     self.last_error = err
@@ -60,6 +75,68 @@ class VeoSession:
         except Exception as e:
             self.last_error = str(e)
             return False, f"❌ Login Veo échoué : {type(e).__name__} — {e}"
+
+    def _navigate_to_login_form(self, page, timeout_ms: int) -> bool:
+        for url in VEO_LOGIN_CANDIDATES:
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                continue
+
+            if self._has_login_form(page):
+                return True
+
+            for sel in [
+                'a:has-text("Log in")', 'a:has-text("Login")',
+                'a:has-text("Sign in")', 'a:has-text("Connexion")',
+                'button:has-text("Log in")', 'button:has-text("Login")',
+            ]:
+                try:
+                    page.locator(sel).first.click(timeout=2000)
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                    if self._has_login_form(page):
+                        return True
+                except Exception:
+                    continue
+        return self._has_login_form(page)
+
+    @staticmethod
+    def _has_login_form(page) -> bool:
+        for sel in [
+            'input[type="email"]', 'input[name="email"]',
+            'input[name="username"]', 'input[autocomplete="email"]',
+        ]:
+            try:
+                if page.locator(sel).count() > 0:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    @staticmethod
+    def _wait_for_logged_in(page, timeout_ms: int) -> bool:
+        deadline = timeout_ms
+        try:
+            page.wait_for_url(
+                lambda url: "login" not in url.lower() and "sign-in" not in url.lower() and "auth" not in url.lower(),
+                timeout=deadline,
+            )
+            return True
+        except Exception:
+            pass
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        return "login" not in page.url.lower() and "sign-in" not in page.url.lower()
+
+    @staticmethod
+    def _safe_text(page, selector: str) -> str:
+        try:
+            return page.locator(selector).first.inner_text(timeout=1000) or ""
+        except Exception:
+            return ""
 
     @staticmethod
     def _dismiss_cookies(page) -> None:
