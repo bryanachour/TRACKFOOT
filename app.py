@@ -72,6 +72,49 @@ def _empty_stats() -> str:
     return _stats_html(0, 0, 0, 0.0, 0.0)
 
 
+def _players_table(summary: Optional[dict]) -> str:
+    if not summary or not summary.get("players"):
+        return "<p style='color:#94a3b8'>Pas encore de données — lance une analyse.</p>"
+    rows = ""
+    for p in summary["players"][:30]:
+        team = p.get("team")
+        if team == 0:
+            badge = "<span style='background:#EF4444;color:white;padding:2px 8px;border-radius:6px;font-size:0.75rem'>A</span>"
+        elif team == 1:
+            badge = "<span style='background:#3B82F6;color:white;padding:2px 8px;border-radius:6px;font-size:0.75rem'>B</span>"
+        else:
+            badge = "<span style='background:#94A3B8;color:white;padding:2px 8px;border-radius:6px;font-size:0.75rem'>—</span>"
+        poss_pct = f"{p['possession_ratio'] * 100:.1f}%"
+        rows += (
+            f"<tr>"
+            f"<td style='padding:8px 12px;font-weight:600'>#{p['tracker_id']}</td>"
+            f"<td style='padding:8px 12px'>{badge}</td>"
+            f"<td style='padding:8px 12px;text-align:right'>{p['distance_m']} m</td>"
+            f"<td style='padding:8px 12px;text-align:right'>{p['speed_avg_kmh']} km/h</td>"
+            f"<td style='padding:8px 12px;text-align:right'>{p['speed_max_kmh']} km/h</td>"
+            f"<td style='padding:8px 12px;text-align:right'>{poss_pct}</td>"
+            f"<td style='padding:8px 12px;text-align:right;color:#94a3b8'>{p['n_frames']}</td>"
+            f"</tr>"
+        )
+    return (
+        "<div style='overflow:auto;border-radius:12px;border:1px solid var(--border-color-primary)'>"
+        "<table style='width:100%;border-collapse:collapse;font-size:0.9rem'>"
+        "<thead style='background:var(--block-background-fill);position:sticky;top:0'>"
+        "<tr>"
+        "<th style='padding:10px 12px;text-align:left'>ID</th>"
+        "<th style='padding:10px 12px;text-align:left'>Équipe</th>"
+        "<th style='padding:10px 12px;text-align:right'>Distance</th>"
+        "<th style='padding:10px 12px;text-align:right'>V moy</th>"
+        "<th style='padding:10px 12px;text-align:right'>V max</th>"
+        "<th style='padding:10px 12px;text-align:right'>Possession</th>"
+        "<th style='padding:10px 12px;text-align:right'>Frames</th>"
+        "</tr></thead><tbody>"
+        f"{rows}"
+        "</tbody></table></div>"
+        "<p style='font-size:0.78rem;color:#94a3b8;margin-top:8px'>Trié par distance parcourue. Possession = % des frames avec ballon détecté où ce joueur est le plus proche (rayon 2.5m).</p>"
+    )
+
+
 def process(
     file_path: Optional[str],
     url: str,
@@ -81,7 +124,7 @@ def process(
     progress: gr.Progress = gr.Progress(),
 ) -> Tuple[Optional[str], Optional[str], Optional[str], List[str], str, Optional[str], str]:
     if not file_path and not (url and url.strip()):
-        return None, None, None, [], _empty_stats(), None, "⚠️ Upload un fichier mp4 ou colle une URL."
+        return None, None, None, [], _empty_stats(), None, None, _players_table(None), "⚠️ Upload un fichier mp4 ou colle une URL."
 
     started = datetime.now()
     try:
@@ -105,7 +148,7 @@ def process(
 
         result = run(opts, progress_cb=cb)
     except Exception as e:
-        return None, None, None, [], _empty_stats(), None, f"❌ Erreur : {type(e).__name__} — {e}"
+        return None, None, None, [], _empty_stats(), None, None, _players_table(None), f"❌ Erreur : {type(e).__name__} — {e}"
 
     took = (datetime.now() - started).total_seconds()
     stats = _stats_html(result.n_players, result.n_frames, result.n_ball_points, result.fps, took)
@@ -119,6 +162,8 @@ def process(
         gallery,
         stats,
         str(result.trajectories_json) if result.trajectories_json else None,
+        str(result.stats_json) if result.stats_json else None,
+        _players_table(result.stats_summary),
         f"✅ Analyse terminée en {took:.1f}s — {result.n_frames} frames, {result.n_players} joueurs trackés.",
     )
 
@@ -184,13 +229,16 @@ def build_app() -> gr.Blocks:
                     object_fit="contain",
                     show_label=False,
                 )
-            with gr.Tab("📊 Trajectoires JSON"):
-                json_file = gr.File(label="Télécharger trajectoires.json", interactive=False)
+            with gr.Tab("📈 Stats joueurs"):
+                players_table = gr.HTML(_players_table(None))
+                with gr.Row():
+                    stats_file = gr.File(label="stats.json", interactive=False)
+                    json_file = gr.File(label="trajectoires.json", interactive=False)
 
         run_btn.click(
             fn=process,
             inputs=[file_in, url_in, stride, device, save_stacked],
-            outputs=[cam_video, tac_video, stk_video, heatmaps, stats_html, json_file, status],
+            outputs=[cam_video, tac_video, stk_video, heatmaps, stats_html, json_file, stats_file, players_table, status],
         )
 
         gr.Markdown(

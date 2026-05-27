@@ -12,6 +12,8 @@ import config as C
 from .detection import YoloDetector, BallDetector, split_by_class
 from .homography import PitchTransformerSmoother, bottom_centre_points
 from .pitch import SoccerPitchConfiguration
+from .stats import StatsAggregator
+from .teams import TeamClassifier
 from .tracking import build_tracker
 from .trajectories import TrajectoryStore, export_heatmaps
 from .visualization import (
@@ -37,6 +39,8 @@ class PipelineOptions:
     save_annotated: bool = True
     save_tactical: bool = True
     save_stacked: bool = True
+    enable_team_classification: bool = True
+    enable_stats: bool = True
 
 
 @dataclass
@@ -45,12 +49,14 @@ class PipelineResult:
     tactical: Optional[Path] = None
     stacked: Optional[Path] = None
     trajectories_json: Optional[Path] = None
+    stats_json: Optional[Path] = None
     heatmaps_dir: Optional[Path] = None
     heatmap_files: list = field(default_factory=list)
     n_players: int = 0
     n_frames: int = 0
     n_ball_points: int = 0
     fps: float = 0.0
+    stats_summary: Optional[dict] = None
 
 
 def _load_pitch_model(weights: Path, device: Optional[str]) -> YOLO:
@@ -86,6 +92,12 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
     smoother = PitchTransformerSmoother(cfg, min_inliers=C.HOMOGRAPHY_MIN_INLIERS, alpha=C.HOMOGRAPHY_SMOOTHING)
     annotators = build_annotators()
     store = TrajectoryStore()
+    team_classifier: Optional[TeamClassifier] = TeamClassifier() if opts.enable_team_classification else None
+    stats_agg: Optional[StatsAggregator] = StatsAggregator(
+        fps=float(video_info.fps),
+        pitch_length_cm=cfg.length,
+        pitch_width_cm=cfg.width,
+    ) if opts.enable_stats else None
 
     annotated_path = opts.output_dir / "annotated.mp4"
     tactical_path = opts.output_dir / "tactical.mp4"
@@ -135,6 +147,17 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
                 if len(ball) > 0:
                     ball_xy_cm = transformer.transform_points(bottom_centre_points(ball))
 
+            team_ids: Optional[np.ndarray] = None
+            if team_classifier is not None and len(players) > 0:
+                team_classifier.observe(frame, players)
+                if team_classifier.calibrated and players.tracker_id is not None:
+                    team_ids = team_classifier.team_ids_for(players.tracker_id)
+
+            possessor: Optional[int] = None
+            if stats_agg is not None and len(players_xy_cm) > 0 and players.tracker_id is not None:
+                stats_agg.update(frame_idx, players.tracker_id, players_xy_cm, ball_xy_cm, team_ids)
+                possessor = stats_agg.current_possessor
+
             if len(players_xy_cm) > 0 and players.tracker_id is not None:
                 store.add_players(frame_idx, players.tracker_id, players_xy_cm)
             if len(ball_xy_cm) > 0:
@@ -142,7 +165,7 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
 
             anno = None
             if "annotated" in sinks or "stacked" in sinks:
-                anno = annotate_frame(frame, players, referees, ball, annotators)
+                anno = annotate_frame(frame, players, referees, ball, annotators, team_ids=team_ids, possessor_id=possessor)
             if "annotated" in sinks:
                 sinks["annotated"].write_frame(anno)
 
@@ -156,6 +179,8 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
                     out_w=C.PITCH_OUT_WIDTH_PX,
                     out_h=C.PITCH_OUT_HEIGHT_PX,
                     margin=C.PITCH_MARGIN_PX,
+                    team_ids=team_ids,
+                    possessor_id=possessor,
                 )
 
             if "tactical" in sinks:
@@ -179,10 +204,19 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
     heatmap_dir = opts.output_dir / "heatmaps"
     export_heatmaps(store, cfg, heatmap_dir)
 
+    stats_json = None
+    summary = None
+    if stats_agg is not None:
+        stats_json = opts.output_dir / "stats.json"
+        stats_agg.save_json(stats_json)
+        summary = stats_agg.summary()
+
     result.annotated = annotated_path if opts.save_annotated else None
     result.tactical = tactical_path if opts.save_tactical else None
     result.stacked = stacked_path if opts.save_stacked else None
     result.trajectories_json = json_path
+    result.stats_json = stats_json
+    result.stats_summary = summary
     result.heatmaps_dir = heatmap_dir
     result.heatmap_files = sorted(heatmap_dir.glob("*.png")) if heatmap_dir.exists() else []
     result.n_players = len(store.tracks)

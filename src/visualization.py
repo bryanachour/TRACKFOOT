@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -12,8 +12,10 @@ PALETTE = sv.ColorPalette.from_hex([
     "#FFD700", "#9370DB", "#00CED1", "#FF6347",
 ])
 
+TEAM_COLORS = [sv.Color.from_hex("#EF4444"), sv.Color.from_hex("#3B82F6")]
 BALL_COLOR = sv.Color.from_hex("#FFD700")
 REFEREE_COLOR = sv.Color.from_hex("#FF00FF")
+UNKNOWN_TEAM_COLOR = sv.Color.from_hex("#94A3B8")
 
 
 def build_annotators() -> Dict[str, object]:
@@ -44,12 +46,27 @@ def annotate_frame(
     referees: sv.Detections,
     ball: sv.Detections,
     annotators: Dict[str, object],
+    team_ids: Optional[np.ndarray] = None,
+    possessor_id: Optional[int] = None,
 ) -> np.ndarray:
     out = frame.copy()
     if len(players) > 0:
-        out = annotators["ellipse"].annotate(out, players)
-        labels = [f"#{tid}" for tid in players.tracker_id] if players.tracker_id is not None else None
-        if labels:
+        if team_ids is not None and players.tracker_id is not None:
+            for team_id in (0, 1, -1):
+                mask = team_ids == team_id
+                if not mask.any():
+                    continue
+                sub = players[mask]
+                color = TEAM_COLORS[team_id] if team_id in (0, 1) else UNKNOWN_TEAM_COLOR
+                ell = sv.EllipseAnnotator(color=color, thickness=2)
+                out = ell.annotate(out, sub)
+        else:
+            out = annotators["ellipse"].annotate(out, players)
+        if players.tracker_id is not None:
+            labels = []
+            for tid in players.tracker_id:
+                tag = "★" if possessor_id is not None and int(tid) == possessor_id else ""
+                labels.append(f"{tag}#{tid}")
             out = annotators["label"].annotate(out, players, labels=labels)
         out = annotators["trace"].annotate(out, players)
     if len(referees) > 0:
@@ -68,6 +85,8 @@ def render_tactical_view(
     out_w: int = 1050,
     out_h: int = 680,
     margin: int = 40,
+    team_ids: Optional[np.ndarray] = None,
+    possessor_id: Optional[int] = None,
 ) -> np.ndarray:
     pitch, scale, offset = draw_pitch(cfg, out_w=out_w, out_h=out_h, margin=margin)
 
@@ -77,12 +96,19 @@ def render_tactical_view(
                 continue
             px, py = pitch_to_image((x, y), scale, offset)
             tid = int(player_ids[i]) if player_ids is not None else 0
-            color = PALETTE.by_idx(tid)
-            cv2.circle(pitch, (px, py), 7, color.as_bgr(), -1, cv2.LINE_AA)
-            cv2.circle(pitch, (px, py), 7, (0, 0, 0), 1, cv2.LINE_AA)
+            if team_ids is not None and 0 <= team_ids[i] <= 1:
+                color = TEAM_COLORS[int(team_ids[i])]
+            elif team_ids is not None:
+                color = UNKNOWN_TEAM_COLOR
+            else:
+                color = PALETTE.by_idx(tid)
+            cv2.circle(pitch, (px, py), 8, color.as_bgr(), -1, cv2.LINE_AA)
+            cv2.circle(pitch, (px, py), 8, (20, 20, 20), 1, cv2.LINE_AA)
+            if possessor_id is not None and tid == possessor_id:
+                cv2.circle(pitch, (px, py), 13, BALL_COLOR.as_bgr(), 2, cv2.LINE_AA)
             if player_ids is not None:
-                cv2.putText(pitch, str(tid), (px + 8, py - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(pitch, str(tid), (px + 9, py - 9),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
 
     if len(ball_xy_cm) > 0:
         for x, y in ball_xy_cm:
