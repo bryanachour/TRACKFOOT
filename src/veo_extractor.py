@@ -140,6 +140,31 @@ class VeoSession:
             return ""
 
     @staticmethod
+    def _dismiss_modal(page) -> None:
+        for sel in [
+            '[role="dialog"] button[aria-label*="close" i]',
+            '[role="dialog"] button[aria-label*="dismiss" i]',
+            '[role="dialog"] button[aria-label*="fermer" i]',
+            'button[aria-label="Close"]',
+            'button[aria-label="close"]',
+            '[class*="modal" i] button[class*="close" i]',
+            '[class*="Modal" i] button[class*="Close" i]',
+            '[role="dialog"] svg[class*="close" i]',
+            '[role="dialog"] button:has(svg)',
+        ]:
+            try:
+                page.locator(sel).first.click(timeout=1500)
+                page.wait_for_timeout(400)
+                return
+            except Exception:
+                continue
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+        except Exception:
+            pass
+
+    @staticmethod
     def _dismiss_cookies(page) -> None:
         for sel in [
             'button:has-text("Accept")', 'button:has-text("Accepter")',
@@ -237,12 +262,16 @@ class VeoSession:
                 lo = url.lower()
                 if any(tok in lo for tok in [".m3u8", ".mpd", ".mp4", ".m4s", ".ts", "playlist", "manifest"]):
                     media_urls.append(url)
-                if captured:
+                if captured.get("url"):
                     return
                 if ".m3u8" in lo or ".mpd" in lo:
                     captured["url"] = url
                     captured["headers"] = dict(req.headers)
                     captured["kind"] = "hls" if ".m3u8" in lo else "dash"
+                elif ".mp4" in lo and "thumb" not in lo and "preview" not in lo and "poster" not in lo:
+                    if "mp4_url" not in captured:
+                        captured["mp4_url"] = url
+                        captured["mp4_headers"] = dict(req.headers)
 
             page.on("request", on_request)
             page.goto(match_url, wait_until="domcontentloaded", timeout=m3u8_timeout_ms)
@@ -251,6 +280,7 @@ class VeoSession:
             except Exception:
                 pass
             self._dismiss_cookies(page)
+            self._dismiss_modal(page)
 
             for sel in [
                 'video',
@@ -273,11 +303,16 @@ class VeoSession:
 
             elapsed = 0
             poll_ms = 500
-            while not captured and elapsed < m3u8_timeout_ms:
+            while not captured.get("url") and elapsed < m3u8_timeout_ms:
                 page.wait_for_timeout(poll_ms)
                 elapsed += poll_ms
 
-            if not captured:
+            if not captured.get("url") and captured.get("mp4_url"):
+                captured["url"] = captured["mp4_url"]
+                captured["headers"] = captured["mp4_headers"]
+                captured["kind"] = "mp4"
+
+            if not captured.get("url"):
                 debug_dir = output_path.parent
                 debug_dir.mkdir(parents=True, exist_ok=True)
                 stamp = int(time.time())
