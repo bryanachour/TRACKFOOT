@@ -12,3 +12,4 @@ roboflow>=1.1.0
 gradio>=4.20.0
 yt-dlp>=2024.4.9
 playwright>=1.40.0
+gdown>=5.0.0
