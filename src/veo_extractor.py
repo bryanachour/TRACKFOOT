@@ -1,8 +1,9 @@
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 VEO_URL_RE = re.compile(r"^https?://(?:app\.)?veo\.co/", re.IGNORECASE)
@@ -209,41 +210,66 @@ class VeoSession:
             return "❌ Toujours sur la page login (creds invalides ? captcha ? 2FA ?)"
         return f"❌ Login indéterminé (URL actuelle : {url})"
 
-    def extract_mp4(self, match_url: str, output_path: Path, m3u8_timeout_ms: int = 45000) -> Path:
+    def extract_mp4(self, match_url: str, output_path: Path, m3u8_timeout_ms: int = 60000) -> Path:
         if not self.connected or self.storage_state is None:
             raise RuntimeError("Veo : connecte-toi d'abord (panneau 🔐 Veo)")
 
         from playwright.sync_api import sync_playwright
 
         captured: dict = {}
+        media_urls: List[str] = []
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            context = browser.new_context(storage_state=self.storage_state)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            context = browser.new_context(
+                storage_state=self.storage_state,
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                ),
+            )
             page = context.new_page()
 
             def on_request(req):
+                url = req.url
+                lo = url.lower()
+                if any(tok in lo for tok in [".m3u8", ".mpd", ".mp4", ".m4s", ".ts", "playlist", "manifest"]):
+                    media_urls.append(url)
                 if captured:
                     return
-                if ".m3u8" in req.url and "veo" in req.url:
-                    captured["url"] = req.url
+                if ".m3u8" in lo or ".mpd" in lo:
+                    captured["url"] = url
                     captured["headers"] = dict(req.headers)
+                    captured["kind"] = "hls" if ".m3u8" in lo else "dash"
 
             page.on("request", on_request)
             page.goto(match_url, wait_until="domcontentloaded", timeout=m3u8_timeout_ms)
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
             self._dismiss_cookies(page)
 
             for sel in [
-                'button[aria-label*="play" i]',
-                'button:has-text("Play")',
                 'video',
+                'button[aria-label*="play" i]',
+                'button[title*="play" i]',
+                'button:has-text("Play")',
                 '[class*="play-button" i]',
+                '[class*="PlayButton" i]',
+                '[data-testid*="play" i]',
             ]:
                 try:
-                    page.locator(sel).first.click(timeout=4000)
+                    page.locator(sel).first.click(timeout=3000)
                     break
                 except Exception:
                     continue
+            try:
+                page.evaluate("document.querySelectorAll('video').forEach(v => { v.muted = true; v.play().catch(() => {}); })")
+            except Exception:
+                pass
 
             elapsed = 0
             poll_ms = 500
@@ -252,8 +278,29 @@ class VeoSession:
                 elapsed += poll_ms
 
             if not captured:
+                debug_dir = output_path.parent
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                stamp = int(time.time())
+                shot_path = debug_dir / f"veo_debug_{stamp}.png"
+                try:
+                    page.screenshot(path=str(shot_path), full_page=False)
+                except Exception:
+                    shot_path = None
+                title = ""
+                try:
+                    title = page.title()
+                except Exception:
+                    pass
+                url_now = page.url
+                seen = "\n  ".join(dict.fromkeys(media_urls[:15])) or "(rien)"
                 browser.close()
-                raise RuntimeError("Pas de stream .m3u8 capturé — Veo a peut-être changé son player, ou tu n'as pas accès à ce match")
+                raise RuntimeError(
+                    "Pas de stream HLS/DASH détecté dans la page.\n"
+                    f"URL actuelle : {url_now}\n"
+                    f"Titre : {title}\n"
+                    f"URLs media vues :\n  {seen}\n"
+                    + (f"Screenshot debug : {shot_path}" if shot_path else "")
+                )
 
             cookies = context.cookies(captured["url"])
             cookies_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
