@@ -10,7 +10,10 @@ Models used (Roboflow Universe):
 import argparse
 import os
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from roboflow import Roboflow
 
