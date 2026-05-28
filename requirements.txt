@@ -12,3 +12,6 @@ roboflow>=1.1.0
 gradio>=4.20.0
 yt-dlp>=2024.4.9
 gdown>=5.0.0
+transformers>=4.40.0
+umap-learn>=0.5.5
+boxmot>=10.0.0

@@ -12,3 +12,4 @@ output/
 
 .ipynb_checkpoints/
 .DS_Store
+veo_match_meta.json

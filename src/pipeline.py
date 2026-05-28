@@ -59,18 +59,37 @@ class PipelineResult:
     stats_summary: Optional[dict] = None
 
 
-def _load_pitch_model(weights: Path, device: Optional[str]) -> YOLO:
-    model = YOLO(str(weights))
-    if device is not None and device != "cpu":
+def _load_pitch_model(weights: Path, device: Optional[str], imgsz: int = 640, half: bool = True) -> YOLO:
+    weights = Path(weights)
+    engine = weights.with_suffix(".engine")
+    use_gpu = device is not None and device != "cpu"
+
+    if use_gpu and engine.exists():
         try:
-            model.to(f"cuda:{device}" if device.isdigit() else device)
+            return YOLO(str(engine), task="pose")
+        except Exception:
+            pass
+    if use_gpu:
+        try:
+            import tensorrt  # noqa: F401
+            pt_model = YOLO(str(weights))
+            pt_model.export(format="engine", half=half, imgsz=imgsz, device=device, dynamic=False, batch=1, verbose=False)
+            if engine.exists():
+                return YOLO(str(engine), task="pose")
+        except Exception:
+            pass
+
+    model = YOLO(str(weights))
+    if use_gpu:
+        try:
+            model.to(f"cuda:{device}" if str(device).isdigit() else device)
         except Exception:
             pass
     return model
 
 
-def _pitch_keypoints(model: YOLO, frame: np.ndarray, conf: float, device: Optional[str]) -> sv.KeyPoints:
-    result = model.predict(frame, conf=conf, device=device, verbose=False)[0]
+def _pitch_keypoints(model: YOLO, frame: np.ndarray, conf: float, device: Optional[str], imgsz: int = 640, half: bool = True) -> sv.KeyPoints:
+    result = model.predict(frame, conf=conf, device=device, imgsz=imgsz, half=half, verbose=False)[0]
     return sv.KeyPoints.from_ultralytics(result)
 
 
@@ -84,9 +103,9 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
     video_info = sv.VideoInfo.from_video_path(str(opts.source))
     cfg = SoccerPitchConfiguration()
 
-    player_det = YoloDetector(opts.player_weights, conf=C.PLAYER_CONF, iou=C.NMS_IOU, device=opts.device)
-    pitch_model = _load_pitch_model(opts.pitch_weights, opts.device)
-    ball_det = BallDetector(opts.ball_weights, conf=C.BALL_CONF, device=opts.device) if opts.ball_weights and opts.ball_weights.exists() else None
+    player_det = YoloDetector(opts.player_weights, conf=C.PLAYER_CONF, iou=C.NMS_IOU, device=opts.device, imgsz=C.INFERENCE_IMGSZ)
+    pitch_model = _load_pitch_model(opts.pitch_weights, opts.device, imgsz=C.INFERENCE_IMGSZ)
+    ball_det = BallDetector(opts.ball_weights, conf=C.BALL_CONF, device=opts.device, imgsz=C.INFERENCE_IMGSZ) if opts.ball_weights and opts.ball_weights.exists() else None
 
     tracker = build_tracker(
         frame_rate=int(video_info.fps),
@@ -142,7 +161,7 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
             else:
                 ball = split_by_class(dets, C.CLASS_BALL)
 
-            kpts = _pitch_keypoints(pitch_model, frame, C.PITCH_CONF, opts.device)
+            kpts = _pitch_keypoints(pitch_model, frame, C.PITCH_CONF, opts.device, imgsz=C.INFERENCE_IMGSZ)
             transformer = smoother.update(kpts)
 
             players_xy_cm = np.zeros((0, 2), dtype=np.float32)
