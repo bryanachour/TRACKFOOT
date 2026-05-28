@@ -6,26 +6,20 @@ from typing import Optional
 
 import yt_dlp
 
-from .veo_extractor import get_session, is_veo_url
-
 
 URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+VEO_URL_RE = re.compile(r"^https?://(?:app\.)?veo\.co/", re.IGNORECASE)
 
 
 def is_url(text: str) -> bool:
     return bool(URL_RE.match(text.strip()))
 
 
+def is_veo_url(text: str) -> bool:
+    return bool(VEO_URL_RE.match(text.strip()))
+
+
 def download_url(url: str, dest_dir: Path, progress_hook: Optional[callable] = None) -> Path:
-    url = url.strip()
-    if is_veo_url(url):
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        out = dest_dir / f"veo_{uuid.uuid4().hex}.mp4"
-        return get_session().extract_mp4(url, out)
-    return _download_via_ytdlp(url, dest_dir, progress_hook)
-
-
-def _download_via_ytdlp(url: str, dest_dir: Path, progress_hook: Optional[callable] = None) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(dest_dir / f"{uuid.uuid4().hex}.%(ext)s")
     opts = {
@@ -39,7 +33,7 @@ def _download_via_ytdlp(url: str, dest_dir: Path, progress_hook: Optional[callab
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+        info = ydl.extract_info(url.strip(), download=True)
         path = Path(ydl.prepare_filename(info))
     if not path.exists():
         for cand in dest_dir.glob(f"{path.stem}.*"):
@@ -67,8 +61,5 @@ def hint_for_url(url: str) -> Optional[str]:
     if not url or not is_url(url):
         return None
     if is_veo_url(url):
-        sess = get_session()
-        if not sess.connected:
-            return "⚠️ URL Veo détectée — connecte-toi d'abord dans le panneau 🔐 Veo en haut."
-        return f"✅ URL Veo, session active ({sess.email})"
+        return "✅ URL Veo détectée — téléchargement direct via yt-dlp (pas de login requis pour les matchs publics)"
     return None

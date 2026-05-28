@@ -15,7 +15,6 @@ except Exception:
 import config as C
 from src.ingest import resolve_input, hint_for_url
 from src.pipeline import PipelineOptions, run
-from src.veo_extractor import get_session as get_veo_session
 
 
 UPLOAD_DIR = C.ROOT / "uploads"
@@ -71,15 +70,6 @@ def _stats_html(n_players: int, n_frames: int, n_ball: int, fps: float, took_s: 
 
 def _empty_stats() -> str:
     return _stats_html(0, 0, 0, 0.0, 0.0)
-
-
-def _veo_status_md() -> str:
-    s = get_veo_session()
-    if s.connected:
-        return f"<span style='color:#10b981'>✅ Connecté</span> en tant que <code>{s.email}</code>"
-    if s.last_error:
-        return f"<span style='color:#f59e0b'>{s.last_error}</span>"
-    return "<span style='color:#94a3b8'>Non connecté</span>"
 
 
 def _players_table(summary: Optional[dict]) -> str:
@@ -196,27 +186,6 @@ def build_app() -> gr.Blocks:
             """
         )
 
-        with gr.Accordion("🔐 Veo — login (1 fois par session)", open=False) as veo_acc:
-            gr.Markdown(
-                "<span style='font-size:0.85rem;color:#64748b'>"
-                "Permet de coller directement un lien `app.veo.co/matches/...` au lieu de télécharger le mp4. "
-                "Tes creds restent dans CETTE session Colab — ne partage pas l'URL gradio.live tant que le form est rempli."
-                "</span>"
-            )
-            with gr.Row():
-                veo_email = gr.Textbox(label="Email Veo", placeholder="toi@exemple.com", scale=2)
-                veo_password = gr.Textbox(label="Password", type="password", scale=2)
-                veo_btn = gr.Button("Connecter", variant="primary", scale=1)
-            veo_status = gr.Markdown(value=_veo_status_md())
-
-            def _do_veo_login(email: str, password: str) -> str:
-                if not email or not password:
-                    return "⚠️ Email + password requis."
-                ok, msg = get_veo_session().login(email.strip(), password)
-                return msg
-
-            veo_btn.click(fn=_do_veo_login, inputs=[veo_email, veo_password], outputs=veo_status)
-
         with gr.Row():
             with gr.Column(scale=1):
                 file_in = gr.File(
@@ -231,14 +200,14 @@ def build_app() -> gr.Blocks:
                     lines=1,
                 )
                 url_hint = gr.Markdown(
-                    "<span style='font-size:0.82rem;color:#64748b'>Veo, mp4 direct, YouTube. Pour Veo : connecte-toi dans le panneau ci-dessus.</span>"
+                    "<span style='font-size:0.82rem;color:#64748b'>Veo, mp4 direct, YouTube — géré nativement par yt-dlp.</span>"
                 )
 
                 def _on_url_change(u: str) -> str:
                     hint = hint_for_url(u or "")
                     if hint:
                         return f"<span style='font-size:0.82rem'>{hint}</span>"
-                    return "<span style='font-size:0.82rem;color:#64748b'>Veo, mp4 direct, YouTube. Pour Veo : connecte-toi dans le panneau ci-dessus.</span>"
+                    return "<span style='font-size:0.82rem;color:#64748b'>Veo, mp4 direct, YouTube — géré nativement par yt-dlp.</span>"
 
                 url_in.change(fn=_on_url_change, inputs=url_in, outputs=url_hint)
 
