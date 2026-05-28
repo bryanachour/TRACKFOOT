@@ -27,7 +27,7 @@ class YoloDetector:
 
 
 class BallDetector(YoloDetector):
-    def __call__(self, frame: np.ndarray, slicer_slice_wh=(640, 640), overlap=(64, 64)) -> sv.Detections:
+    def __call__(self, frame: np.ndarray, slicer_slice_wh=(640, 640)) -> sv.Detections:
         def _callback(patch: np.ndarray) -> sv.Detections:
             result = self.model.predict(
                 patch,
@@ -39,12 +39,10 @@ class BallDetector(YoloDetector):
             )[0]
             return sv.Detections.from_ultralytics(result)
 
-        slicer = sv.InferenceSlicer(
-            callback=_callback,
-            slice_wh=slicer_slice_wh,
-            overlap_ratio_wh=None,
-            overlap_wh=overlap,
-        )
+        try:
+            slicer = sv.InferenceSlicer(callback=_callback, slice_wh=slicer_slice_wh)
+        except TypeError:
+            slicer = sv.InferenceSlicer(callback=_callback)
         return slicer(frame)
 
 
