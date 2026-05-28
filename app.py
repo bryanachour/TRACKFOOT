@@ -212,7 +212,7 @@ def build_app() -> gr.Blocks:
                 url_in.change(fn=_on_url_change, inputs=url_in, outputs=url_hint)
 
         with gr.Row():
-            stride = gr.Slider(1, 5, value=1, step=1, label="Stride (1 = toutes les frames)")
+            stride = gr.Slider(1, 15, value=5, step=1, label="Stride (5 = 1 frame sur 5 — recommandé)")
             device = gr.Textbox(value=DEFAULT_DEVICE, label="Device", scale=1)
             save_stacked = gr.Checkbox(value=True, label="Vidéo combinée (caméra + tactique)")
 
