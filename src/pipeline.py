@@ -39,7 +39,7 @@ class PipelineOptions:
     save_annotated: bool = True
     save_tactical: bool = True
     save_stacked: bool = True
-    enable_team_classification: bool = True
+    enable_team_classification: bool = False
     enable_stats: bool = True
 
 

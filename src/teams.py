@@ -143,10 +143,13 @@ class TeamClassifier:
         valid_crops: List[np.ndarray] = []
         valid_tids: List[int] = []
         for i, tid in enumerate(players.tracker_id):
+            tid_int = int(tid)
+            if len(self._player_history.get(tid_int, [])) >= 10:
+                continue
             crop = self._crop_jersey(frame, players.xyxy[i])
             if crop is not None:
                 valid_crops.append(crop)
-                valid_tids.append(int(tid))
+                valid_tids.append(tid_int)
         if not valid_crops:
             return
         try:
