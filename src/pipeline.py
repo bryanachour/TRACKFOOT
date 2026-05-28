@@ -60,7 +60,13 @@ class PipelineResult:
 
 
 def _load_pitch_model(weights: Path, device: Optional[str]) -> YOLO:
-    return YOLO(str(weights))
+    model = YOLO(str(weights))
+    if device is not None and device != "cpu":
+        try:
+            model.to(f"cuda:{device}" if device.isdigit() else device)
+        except Exception:
+            pass
+    return model
 
 
 def _pitch_keypoints(model: YOLO, frame: np.ndarray, conf: float, device: Optional[str]) -> sv.KeyPoints:

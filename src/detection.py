@@ -9,6 +9,11 @@ from ultralytics import YOLO
 class YoloDetector:
     def __init__(self, weights_path: Path, conf: float = 0.30, iou: float = 0.50, device: Optional[str] = None, imgsz: int = 1280):
         self.model = YOLO(str(weights_path))
+        if device is not None and device != "cpu":
+            try:
+                self.model.to(f"cuda:{device}" if device.isdigit() else device)
+            except Exception:
+                pass
         self.conf = conf
         self.iou = iou
         self.device = device

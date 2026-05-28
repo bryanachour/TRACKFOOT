@@ -120,6 +120,7 @@ def process(
     url: str,
     stride: int,
     device: str,
+    skip_ball: bool,
     save_stacked: bool,
     progress: gr.Progress = gr.Progress(),
 ) -> Tuple[Optional[str], Optional[str], Optional[str], List[str], str, Optional[str], str]:
@@ -140,6 +141,7 @@ def process(
             save_annotated=True,
             save_tactical=True,
             save_stacked=save_stacked,
+            ball_weights=None if skip_ball else C.BALL_DETECTION_WEIGHTS,
         )
 
         def cb(cur: int, total: int, msg: str) -> None:
@@ -214,7 +216,8 @@ def build_app() -> gr.Blocks:
         with gr.Row():
             stride = gr.Slider(1, 15, value=5, step=1, label="Stride (5 = 1 frame sur 5 — recommandé)")
             device = gr.Textbox(value=DEFAULT_DEVICE, label="Device", scale=1)
-            save_stacked = gr.Checkbox(value=True, label="Vidéo combinée (caméra + tactique)")
+            skip_ball = gr.Checkbox(value=True, label="Skip détection ballon (3-5× plus rapide)")
+            save_stacked = gr.Checkbox(value=False, label="Vidéo combinée")
 
         run_btn = gr.Button("▶ Lancer l'analyse", variant="primary", size="lg")
         status = gr.Markdown("")
@@ -245,7 +248,7 @@ def build_app() -> gr.Blocks:
 
         run_btn.click(
             fn=process,
-            inputs=[file_in, url_in, stride, device, save_stacked],
+            inputs=[file_in, url_in, stride, device, skip_ball, save_stacked],
             outputs=[cam_video, tac_video, stk_video, heatmaps, stats_html, json_file, stats_file, players_table, status],
         )
 
