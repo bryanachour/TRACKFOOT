@@ -161,8 +161,11 @@ def run(opts: PipelineOptions, progress_cb: Optional[ProgressCb] = None) -> Pipe
             else:
                 ball = split_by_class(dets, C.CLASS_BALL)
 
-            kpts = _pitch_keypoints(pitch_model, frame, C.PITCH_CONF, opts.device, imgsz=C.INFERENCE_IMGSZ)
-            transformer = smoother.update(kpts)
+            if processed % C.PITCH_DETECTION_EVERY_N_FRAMES == 0:
+                kpts = _pitch_keypoints(pitch_model, frame, C.PITCH_CONF, opts.device, imgsz=C.INFERENCE_IMGSZ)
+                transformer = smoother.update(kpts)
+            else:
+                transformer = smoother._current()
 
             players_xy_cm = np.zeros((0, 2), dtype=np.float32)
             ball_xy_cm = np.zeros((0, 2), dtype=np.float32)
